@@ -104,7 +104,37 @@ end
 
 ---@param all_specs PackitResolvedSpec[]
 local function merge_specs(all_specs)
+	local unique_specs = {}
 
+	for _, s in pairs(all_specs) do
+		if unique_specs[s.src] == nil then
+			unique_specs[s.src] = { s }
+		else
+			unique_specs[s.src]:insert(s)
+		end
+	end
+
+
+	local merged_spec = {}
+
+	for _, u in pairs(unique_specs) do
+		local tl = {}
+		for _, spec in pairs(u) do
+			if spec.dep then
+				--- Merge in dependencies first
+				vim.tbl_deep_extend("force", merged_spec, spec)
+			else
+				--- Top level declarations get merged in last
+				tl:insert(spec)
+			end
+		end
+
+		for _, spec in pairs(tl) do
+			vim.tbl_deep_extend("force", merged_spec, spec)
+		end
+	end
+
+	return merged_spec
 end
 
 
