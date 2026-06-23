@@ -2,7 +2,7 @@ local function is_array(tab)
 	local i = 0
 	for _ in pairs(tab) do
 		i = i + 1
-		if t[i] == nil then return false end
+		if tab[i] == nil then return false end
 	end
 	return true
 end
@@ -38,6 +38,9 @@ end
 local M = {}
 
 function M.load()
+	M.top_level = {}
+	M.load_order = {}
+
 	local config = vim.fn.stdpath("config")
 
 	vim.notify(config)
@@ -53,20 +56,51 @@ function M.load()
 			M.top_level = vim.tbl_deep_extend('force', M.top_level, packages)
 		end
 	end
+
+	M.decide_order()
+	for _, pkg in pairs(M.load_order) do
+		vim.api.nvim_create_autocmd("BufEnter", { callback = vim.notify(pkg[1]) })
+		M.install_spec(pkg)
+	end
+end
+
+---@param name string
+---@return boolean
+function M.has(name)
+	local names = vim.tbl_map(function(spec) return spec[1] end, M.load_order)
+
+	return vim.tbl_contains(names, name)
 end
 
 function M.decide_order()
+	-- Start by coping all the top-level plugins straight into the load order, they will all be loaded first
+	for _, pkg in pairs(M.top_level) do
+		pkg.dependencies = pkg.dependencies or {}
+		for _, dep in pairs(pkg.dependencies) do
+			if (M.has(dep[1]) == false) then
+				vim.tbl_deep_extend("force", M.load_order, dep)
+			end
+		end
+
+		vim.tbl_deep_extend("force", M.load_order, pkg)
+	end
 end
 
 ---@param spec PackitSpec
 function M.install_spec(spec)
 	local src_type = categorise_src(spec[1])
 
-	if src_type == "github" then
+	local url = spec[1]
+	local name = spec.name or url:match("([^/]+)$")
 
-	else if src_type == "url" then
-		
+	if src_type == "github" then
+		url = "https://github.com/" .. url
 	end
+
+
+	vim.pack.add({ src = url, name = spec.name, version = spec.version })
+
+	require(name).setup(spec.opts or {})
 end
 
 return M

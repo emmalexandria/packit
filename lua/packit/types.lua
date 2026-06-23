@@ -8,7 +8,7 @@
 ---@class PackitSpec
 ---@field [1] string
 ---@field name string?
----
+---@field version string?
 ---@field dependencies? PackitSpec[]
 ---@field init? function
 ---@field opts? table
