@@ -13,7 +13,7 @@ As of Neovim v0.12, we have a built-in manager for plugins (not packages, althou
 - Automatic prefixing of your preferred Git provider
 - Familiar plugin spec for `lazy.nvim` users
 
-`packit` is **not** a package manager, it is simply a wrapper plugin around `vim.pack` with some niceties. It's designed to be simple enough that you can understand it in it's entirety with ease, something I value in a Neovim plugin. Folke and echasnovski do amazing work, but they also operate on a different plane of existence to me. 
+`packit` is **not** a package manager, it is simply a wrapper plugin around `vim.pack` with some niceties. It's designed to be simple enough that you can understand it in it's entirety with ease (<500SLoC), something I value in a Neovim plugin. Folke and echasnovski do amazing work, but they also operate on a different plane of existence to me. 
 
 #### Downsides 
 - Extremely naive assumptions about the name of the main module
