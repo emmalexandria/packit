@@ -1,6 +1,7 @@
 local M = {}
 
-local util = require("packit.util")
+local Util = require("packit.util")
+local Pkg = require("packit.pkg")
 
 local _state = {}
 
@@ -33,6 +34,7 @@ local _config = {
 ---@class PackitResolvedSpec
 ---@field src string
 ---@field name string
+---@field c_name string?
 ---@field main string?
 ---@field opts table
 ---@field build function?
@@ -54,12 +56,13 @@ local function plugin_name(url)
 	return name:gsub("%.git$", "")
 end
 
+---@param spec PackitResolvedSpec
 local function run_config(spec)
 	local ok, err = pcall(function()
-		require(spec.main or spec.name).setup(spec.opts or {})
+		require(spec.main or spec.c_name or spec.name).setup(spec.opts or {})
 	end)
 	if not ok and _config.notify then
-		vim.notify("packit config error for " .. spec.name .. ": " .. tostring(err), vim.log.levels.WARN)
+		vim.notify("packit config error for " .. spec.src .. ": " .. tostring(err), vim.log.levels.WARN)
 	end
 end
 
@@ -68,7 +71,7 @@ end
 ---@param dep boolean
 ---@return PackitResolvedSpec[]
 local function normalise(raw, dep)
-	if util.is_array(raw) then
+	if Util.is_array(raw) then
 		local plugins = {}
 		for _, p in pairs(raw) do
 			table.insert(plugins, normalise(p, false))
@@ -83,7 +86,8 @@ local function normalise(raw, dep)
 	---@type PackitResolvedSpec
 	local normalised = {
 		src = source,
-		name = raw.name or plugin_name(source),
+		name = plugin_name(source),
+		c_name = raw.name,
 		main = raw.main,
 		opts = raw.opts,
 		dependency = dep
@@ -144,9 +148,15 @@ end
 local function add_spec(spec)
 	local pack_format = {
 		src = spec.src,
+		name = spec.c_name
 	}
 
 	vim.pack.add({ pack_format })
+
+	if spec.build then
+		Pkg.build_autocmd(spec.main or spec.c_name or spec.name, spec.build)
+	end
+
 	run_config(spec)
 end
 
@@ -163,14 +173,16 @@ local function read_plugins()
 			local raw = require("plugins." .. mod)
 			local plugins = normalise(raw, false)
 
-			_state.plugins = vim.tbl_deep_extend("keep", _state.plugins, plugins)
+			for _, val in ipairs(plugins) do
+				table.insert(_state.plugins, val)
+			end
 		end
 	end
 end
 
 function M.setup(config)
 	read_plugins()
-	_state.plugins = merge_specs(_state.plugins)
+	--_state.plugins = merge_specs(_state.plugins)
 
 	for _, i in pairs(_state.plugins) do
 		add_spec(i)
