@@ -13,4 +13,31 @@ function M.is_array(tab)
 	return true
 end
 
+---@param func function
+---@param tab table
+function M.find_key_pred(func, tab)
+	for k, f in pairs(tab) do
+		if func(f) then
+			return k
+		end
+	end
+end
+
+function M.dump(o)
+	if type(o) == 'table' then
+		local s = '{ '
+		for k, v in pairs(o) do
+			if type(k) ~= 'number' then k = '"' .. k .. '"' end
+			s = s .. '[' .. k .. '] = ' .. M.dump(v) .. ','
+		end
+		return s .. '} '
+	else
+		return tostring(o)
+	end
+end
+
+function M.flatten(arr)
+
+end
+
 return M

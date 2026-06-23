@@ -53,7 +53,10 @@ end
 ---@return string
 local function plugin_name(url)
 	local name = url:match("([^/]+)$") or url or ""
-	return name:gsub("%.git$", "")
+	-- First remove .git if that is in the URL
+	name = name:gsub("%.git$", "")
+	-- Then assume no plugin is ending its name in .nvim
+	return name:gsub("%.nvim$", "")
 end
 
 ---@param spec PackitResolvedSpec
@@ -66,23 +69,8 @@ local function run_config(spec)
 	end
 end
 
-
----@param raw table
----@param dep boolean
----@return PackitResolvedSpec[]
-local function normalise(raw, dep)
-	if Util.is_array(raw) then
-		local plugins = {}
-		for _, p in pairs(raw) do
-			table.insert(plugins, normalise(p, false))
-		end
-		return plugins
-	end
-
-
-	local dependencies = raw.dependencies and vim.tbl_map(normalise, raw.dependencies) or {}
-
-	local source = raw.url or raw[1] or ""
+local function normalise_single(raw, dep)
+	local source = resolve_url(raw[1]) or raw.url or ""
 	---@type PackitResolvedSpec
 	local normalised = {
 		src = source,
@@ -99,50 +87,62 @@ local function normalise(raw, dep)
 		normalised.build = raw.build
 	end
 
-	local ret = {}
-	vim.tbl_deep_extend("keep", ret, dependencies)
-	table.insert(ret, normalised)
+	local dependencies = raw.dependencies and vim.tbl_map(function(d) normalise_single(d, true) end, raw.dependencies) or
+			{}
 
-	return ret
+	local plugins = {}
+	for _, d in pairs(dependencies) do
+		table.insert(d)
+	end
+
+	table.insert(plugins, normalised)
+
+	return plugins
 end
 
----@param all_specs PackitResolvedSpec[]
-local function merge_specs(all_specs)
-	local unique_specs = {}
 
-	for _, s in pairs(all_specs) do
-		if unique_specs[s.src] == nil then
-			unique_specs[s.src] = { s }
-		else
-			table.insert(unique_specs[s.src], s)
+---@param raw table
+---@param dep boolean
+---@return PackitResolvedSpec[]
+local function normalise_file(raw, dep)
+	local plugins = {}
+
+	local function normalise_add(raw, dep)
+		for _, p in pairs(normalise_single(raw, dep)) do
+			table.insert(plugins, p)
 		end
 	end
 
-	local merged_specs = {}
+	if Util.is_array(raw) then
+		for _, p in ipairs(raw) do
+			normalise_add(p, false)
+		end
+		return plugins
+	else
+		normalise_add(raw, false)
+	end
 
-	for _, u in pairs(unique_specs) do
-		local merged_spec = {}
-		local tl = {}
-		for _, spec in pairs(u) do
-			if spec.dep then
-				--- Merge in dependencies first
-				merged_spec = vim.tbl_deep_extend("force", merged_spec, spec)
-			else
-				--- Top level declarations get merged in last
-				table.insert(tl, spec)
+	return plugins
+end
+
+---@param specs PackitResolvedSpec[]
+local function dedup_specs(specs)
+	local dedup = {}
+	for _, s in pairs(specs) do
+		local existing = Util.find_key_pred(function(f) return f.src == s.src end, dedup)
+
+		if existing ~= nil then
+			local val = dedup[existing]
+			if val.dependency == true and s.dependency == false then
+				dedup[existing] = s
 			end
+		else
+			table.insert(dedup, s)
 		end
-
-		for _, spec in pairs(tl) do
-			merged_spec = vim.tbl_deep_extend("force", merged_spec, spec)
-		end
-
-		table.insert(merged_specs, merged_spec)
 	end
 
-	return merged_specs
+	return dedup
 end
-
 
 ---@param spec PackitResolvedSpec
 local function add_spec(spec)
@@ -150,6 +150,8 @@ local function add_spec(spec)
 		src = spec.src,
 		name = spec.c_name
 	}
+
+
 
 	vim.pack.add({ pack_format })
 
@@ -165,24 +167,26 @@ local function read_plugins()
 
 	local plugin_dir = config .. "/lua/plugins"
 
-	_state.plugins = {}
+	local ret_plugins = {}
 
 	for name, type in vim.fs.dir(plugin_dir) do
 		if type == "file" and name:sub(-4) == ".lua" then
 			local mod = name:gsub("%.lua$", "")
 			local raw = require("plugins." .. mod)
-			local plugins = normalise(raw, false)
+			local plugins = normalise_file(raw, false)
 
-			for _, val in ipairs(plugins) do
-				table.insert(_state.plugins, val)
+			for _, p in pairs(plugins) do
+				table.insert(ret_plugins, p)
 			end
 		end
 	end
+
+	return ret_plugins
 end
 
 function M.setup(config)
-	read_plugins()
-	--_state.plugins = merge_specs(_state.plugins)
+	_state.plugins = read_plugins()
+	_state.plugins = dedup_specs(_state.plugins)
 
 	for _, i in pairs(_state.plugins) do
 		add_spec(i)
