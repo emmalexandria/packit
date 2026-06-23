@@ -28,6 +28,7 @@ local _config = {
 ---@field name string?
 ---@field main string?
 ---@field opts table?
+---@field config function?
 ---@field build function?
 ---@field dependencies? PackitUserSpec[]
 
@@ -36,6 +37,7 @@ local _config = {
 ---@field name string
 ---@field c_name string?
 ---@field main string?
+---@field config function?
 ---@field opts table
 ---@field build function?
 ---@field dependency boolean
@@ -62,7 +64,11 @@ end
 ---@param spec PackitResolvedSpec
 local function run_config(spec)
 	local ok, err = pcall(function()
-		require(spec.main or spec.c_name or spec.name).setup(spec.opts or {})
+		if spec.config then
+			spec.config(spec.opts or {})
+		else
+			require(spec.main or spec.c_name or spec.name).setup(spec.opts or {})
+		end
 	end)
 	if not ok and _config.notify then
 		vim.notify("packit config error for " .. spec.src .. ": " .. tostring(err), vim.log.levels.WARN)
@@ -77,6 +83,7 @@ local function normalise_single(raw, dep)
 		name = plugin_name(source),
 		c_name = raw.name,
 		main = raw.main,
+		config = raw.config,
 		opts = raw.opts,
 		dependency = dep
 	}
