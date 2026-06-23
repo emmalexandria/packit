@@ -17,7 +17,7 @@ local _config = {
 }
 
 ---@class PackitPluginState
----@field spec PackitPluginSpec
+---@field spec PackitResolvedSpec
 ---@field loaded boolean
 ---@field path string
 
@@ -25,6 +25,7 @@ local _config = {
 ---@field [1] string?
 ---@field url string?
 ---@field name string?
+---@field main string?
 ---@field opts table?
 ---@field build function?
 ---@field dependencies? PackitUserSpec[]
@@ -32,6 +33,7 @@ local _config = {
 ---@class PackitResolvedSpec
 ---@field src string
 ---@field name string
+---@field main string?
 ---@field opts table
 ---@field build function?
 ---@field dependency boolean
@@ -48,17 +50,13 @@ end
 ---@param url string
 ---@return string
 local function plugin_name(url)
-	local name = url:match("([^/]+)$") or url
+	local name = url:match("([^/]+)$") or url or ""
 	return name:gsub("%.git$", "")
 end
 
 local function run_config(spec)
 	local ok, err = pcall(function()
-		if (type(spec.config) == "function") then
-			spec.config(spec, spec.opts)
-		elseif spec.config == true then
-			require(spec.name).setup(spec.opts or {})
-		end
+		require(spec.main or spec.name).setup(spec.opts or {})
 	end)
 	if not ok and _config.notify then
 		vim.notify("packit config error for " .. spec.name .. ": " .. tostring(err), vim.log.levels.WARN)
@@ -73,18 +71,20 @@ local function normalise(raw, dep)
 	if util.is_array(raw) then
 		local plugins = {}
 		for _, p in pairs(raw) do
-			plugins:insert(normalise(p, false))
+			table.insert(plugins, normalise(p, false))
 		end
 		return plugins
 	end
 
-	local dependencies = vim.tbl_map(normalise, raw.dependencies)
+
+	local dependencies = raw.dependencies and vim.tbl_map(normalise, raw.dependencies) or {}
 
 	local source = raw.url or raw[1] or ""
 	---@type PackitResolvedSpec
 	local normalised = {
 		src = source,
-		name = raw.name or plugin_name(raw.url),
+		name = raw.name or plugin_name(source),
+		main = raw.main,
 		opts = raw.opts,
 		dependency = dep
 	}
@@ -97,7 +97,7 @@ local function normalise(raw, dep)
 
 	local ret = {}
 	vim.tbl_deep_extend("keep", ret, dependencies)
-	ret:insert(normalised)
+	table.insert(ret, normalised)
 
 	return ret
 end
@@ -110,41 +110,44 @@ local function merge_specs(all_specs)
 		if unique_specs[s.src] == nil then
 			unique_specs[s.src] = { s }
 		else
-			unique_specs[s.src]:insert(s)
+			table.insert(unique_specs[s.src], s)
 		end
 	end
 
-
-	local merged_spec = {}
+	local merged_specs = {}
 
 	for _, u in pairs(unique_specs) do
+		local merged_spec = {}
 		local tl = {}
 		for _, spec in pairs(u) do
 			if spec.dep then
 				--- Merge in dependencies first
-				vim.tbl_deep_extend("force", merged_spec, spec)
+				merged_spec = vim.tbl_deep_extend("force", merged_spec, spec)
 			else
 				--- Top level declarations get merged in last
-				tl:insert(spec)
+				table.insert(tl, spec)
 			end
 		end
 
 		for _, spec in pairs(tl) do
-			vim.tbl_deep_extend("force", merged_spec, spec)
+			merged_spec = vim.tbl_deep_extend("force", merged_spec, spec)
 		end
+
+		table.insert(merged_specs, merged_spec)
 	end
 
-	return merged_spec
+	return merged_specs
 end
 
 
+---@param spec PackitResolvedSpec
 local function add_spec(spec)
 	local pack_format = {
-		src = spec.url,
-		name = spec.name
+		src = spec.src,
 	}
 
-	vim.pack.add(pack_format)
+	vim.pack.add({ pack_format })
+	run_config(spec)
 end
 
 local function read_plugins()
@@ -152,18 +155,26 @@ local function read_plugins()
 
 	local plugin_dir = config .. "/lua/plugins"
 
+	_state.plugins = {}
+
 	for name, type in vim.fs.dir(plugin_dir) do
 		if type == "file" and name:sub(-4) == ".lua" then
 			local mod = name:gsub("%.lua$", "")
-			local raw = require("plugins" .. mod)
-			local plugins = normalise(raw)
+			local raw = require("plugins." .. mod)
+			local plugins = normalise(raw, false)
+
+			_state.plugins = vim.tbl_deep_extend("keep", _state.plugins, plugins)
 		end
 	end
 end
 
----@param config PackitConfig
 function M.setup(config)
-	require("packit.package").load()
+	read_plugins()
+	_state.plugins = merge_specs(_state.plugins)
+
+	for _, i in pairs(_state.plugins) do
+		add_spec(i)
+	end
 end
 
 return M
