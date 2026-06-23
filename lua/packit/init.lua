@@ -21,18 +21,20 @@ local _config = {
 ---@field loaded boolean
 ---@field path string
 
----@class PackitPluginSpec
+---@class PackitUserSpec
 ---@field [1] string?
 ---@field url string?
 ---@field name string?
 ---@field opts table?
 ---@field build function?
+---@field dependencies? PackitUserSpec[]
 
 ---@class PackitResolvedSpec
 ---@field src string
 ---@field name string
 ---@field opts table
 ---@field build function?
+---@field dependency boolean
 
 ---@param raw string
 ---@return string
@@ -63,22 +65,29 @@ local function run_config(spec)
 	end
 end
 
+
 ---@param raw table
----@return PackitPluginSpec[]
-local function normalise(raw)
+---@param dep boolean
+---@return PackitResolvedSpec[]
+local function normalise(raw, dep)
 	if util.is_array(raw) then
 		local plugins = {}
 		for _, p in pairs(raw) do
-			plugins:insert(normalise(p))
+			plugins:insert(normalise(p, false))
 		end
 		return plugins
 	end
 
-	---@type PackitPluginSpec
-	local normalised = {}
+	local dependencies = vim.tbl_map(normalise, raw.dependencies)
+
 	local source = raw.url or raw[1] or ""
-	normalised.url = source
-	normalised.name = raw.name or plugin_name(raw.url)
+	---@type PackitResolvedSpec
+	local normalised = {
+		src = source,
+		name = raw.name or plugin_name(raw.url),
+		opts = raw.opts,
+		dependency = dep
+	}
 
 	local build_t = type(raw.build)
 
@@ -86,13 +95,20 @@ local function normalise(raw)
 		normalised.build = raw.build
 	end
 
+	local ret = {}
+	vim.tbl_deep_extend("keep", ret, dependencies)
+	ret:insert(normalised)
 
+	return ret
+end
 
-	return normalised
+---@param all_specs PackitResolvedSpec[]
+local function merge_specs(all_specs)
+
 end
 
 
-local function register_with_pack(spec)
+local function add_spec(spec)
 	local pack_format = {
 		src = spec.url,
 		name = spec.name
@@ -106,7 +122,7 @@ local function read_plugins()
 
 	local plugin_dir = config .. "/lua/plugins"
 
-	for name, type in vim.fs.dir(plugins) do
+	for name, type in vim.fs.dir(plugin_dir) do
 		if type == "file" and name:sub(-4) == ".lua" then
 			local mod = name:gsub("%.lua$", "")
 			local raw = require("plugins" .. mod)
